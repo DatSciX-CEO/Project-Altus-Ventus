@@ -1,0 +1,15 @@
+
+[Unit]
+Description=BeamNG Fan Control Service
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/pi/fan_controller.py
+WorkingDirectory=/home/pi
+StandardOutput=journal
+StandardError=journal
+Restart=always
+User=pi
+
+[Install]
+WantedBy=multi-user.target
