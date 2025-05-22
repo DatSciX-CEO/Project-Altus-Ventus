@@ -1,54 +1,34 @@
 import streamlit as st
 import time
 import random
-import pandas as pd # For charts
+import pandas as pd
+import plotly.graph_objects as go # Import Plotly
 
 # --- Configuration & State Initialization ---
-
-DEFAULT_TOP_SPEED = 150
-# This was the virtual reference in fan_controller_pwm.py
-# We can still use it if we want to maintain the two-step scaling,
-# or simplify to scale directly to top_speed for 100% PWM.
-# For this integrated version, we'll make the scaling more direct:
-# current_speed / top_speed * 100 = PWM.
-# The "70 mph real wind" concept is now tied to how the user sets the 'Vehicle Top Speed for Scaling'.
-# If they set top_speed to 70, then 70mph in game = 100% PWM.
-# If they set top_speed to 150, then 150mph in game = 100% PWM.
+DEFAULT_TOP_SPEED = 70
 
 if 'initialized' not in st.session_state:
     st.session_state.initialized = True
-    st.session_state.top_speed = DEFAULT_TOP_SPEED # Inspired by wind_server.py
+    st.session_state.top_speed = DEFAULT_TOP_SPEED
     st.session_state.current_game_speed_mph = 0.0
     st.session_state.current_pwm_power = 0.0
     st.session_state.simulation_running = False
     st.session_state.manual_speed_mode = False
     st.session_state.manual_speed_setpoint_mph = 0.0
     st.session_state.log_messages = ["Simulator initialized. Welcome!"]
-    # Initialize history_data as an empty DataFrame with correct columns
     st.session_state.history_data = pd.DataFrame(columns=['Time', 'Game Speed (mph)', 'PWM Power (%)'])
     st.session_state.start_time = time.time()
 
-
 # --- Core Logic ---
-
 def calculate_motor_power(current_speed_mph, top_speed_setting):
-    """
-    Calculates motor power based on current speed and top speed setting.
-    The logic is a direct scaling: if current_speed reaches top_speed_setting,
-    PWM is 100%.
-    This adapts the principle from fan_controller_pwm.py.
-    """
-    if top_speed_setting <= 0: # Avoid division by zero or negative speeds
+    if top_speed_setting <= 0:
         return 0.0
-    
-    # Direct linear scaling: (current speed / top_speed_for_100_pwm) * 100
     motor_power = (current_speed_mph / top_speed_setting) * 100
-    
-    motor_power = max(0.0, min(100.0, motor_power)) # Clamp between 0 and 100%
+    motor_power = max(0.0, min(100.0, motor_power))
     return motor_power
 
 def add_log(message):
-    max_logs = 30 # Increased log history
+    max_logs = 30
     st.session_state.log_messages.append(f"{time.strftime('%H:%M:%S')}: {message}")
     if len(st.session_state.log_messages) > max_logs:
         st.session_state.log_messages = st.session_state.log_messages[-max_logs:]
@@ -62,17 +42,14 @@ def update_history(game_speed, pwm_power):
         'PWM Power (%)': [pwm_power]
     }
     new_data_df = pd.DataFrame(new_data_dict)
-    
     st.session_state.history_data = pd.concat([st.session_state.history_data, new_data_df], ignore_index=True)
-    
     if len(st.session_state.history_data) > max_history_points:
         st.session_state.history_data = st.session_state.history_data.iloc[-max_history_points:]
 
 # --- Game Telemetry Simulation Step ---
 def run_simulation_step():
     if not st.session_state.simulation_running:
-        # If simulation is stopped, ensure speed and power reflect this
-        if st.session_state.current_game_speed_mph != 0.0: # Only update if not already zero
+        if st.session_state.current_game_speed_mph != 0.0:
             st.session_state.current_game_speed_mph = 0.0
             st.session_state.current_pwm_power = calculate_motor_power(
                 st.session_state.current_game_speed_mph,
@@ -84,27 +61,20 @@ def run_simulation_step():
 
     if st.session_state.manual_speed_mode:
         new_speed = st.session_state.manual_speed_setpoint_mph
-        # Log only if speed changed, to avoid flooding logs
         if abs(new_speed - st.session_state.current_game_speed_mph) > 0.01 :
              add_log(f"Manual speed updated to: {new_speed:.2f} mph")
-    else: # Random mode
-        # Simulate speed: gentle random walk around a baseline, or more dynamic
-        baseline_speed = st.session_state.top_speed * 0.4 # Tend towards 40% of top speed
-        fluctuation = random.uniform(-st.session_state.top_speed * 0.1, st.session_state.top_speed * 0.1) # Fluctuate by +/-10% of top_speed
-        
-        # Make changes more gradual from current speed
-        change_factor = 0.3 # How much new random value influences current speed
+    else: 
+        baseline_speed = st.session_state.top_speed * 0.4 
+        fluctuation = random.uniform(-st.session_state.top_speed * 0.1, st.session_state.top_speed * 0.1)
+        change_factor = 0.3
         target_random_speed = baseline_speed + fluctuation
-        
         current_speed = st.session_state.current_game_speed_mph
         new_speed = current_speed * (1-change_factor) + target_random_speed * change_factor
-        
         max_possible_speed = st.session_state.top_speed
-        new_speed = max(0, min(new_speed, max_possible_speed)) # Clamp
+        new_speed = max(0, min(new_speed, max_possible_speed))
         add_log(f"Random speed generated: {new_speed:.2f} mph")
 
     st.session_state.current_game_speed_mph = new_speed
-
     st.session_state.current_pwm_power = calculate_motor_power(
         st.session_state.current_game_speed_mph,
         st.session_state.top_speed
@@ -117,16 +87,13 @@ st.set_page_config(layout="wide", page_title="Altus Ventus Simulator")
 st.title("💨 Project Altus Ventus - Wind Simulator")
 st.markdown("An interactive simulator for the wind generation system. Adjust parameters and observe the real-time simulated output for fan control.")
 
-controls_col, visuals_col = st.columns([1, 2]) # Adjust column ratio if needed
+controls_col, visuals_col = st.columns([1, 2])
 
 with controls_col:
     st.header("⚙️ Controls")
-
-    # Renamed from original fan_controller_pwm.py's global 'top_speed'
-    # and wind_server.py's 'top_speed'
     new_top_speed = st.number_input(
         "Vehicle Top Speed for Scaling (mph):",
-        min_value=10, # Sensible minimum
+        min_value=10, 
         max_value=300,
         value=st.session_state.top_speed,
         step=10,
@@ -136,7 +103,6 @@ with controls_col:
     if new_top_speed != st.session_state.top_speed:
         st.session_state.top_speed = new_top_speed
         add_log(f"Vehicle Top Speed for scaling set to: {st.session_state.top_speed} mph")
-        # Recalculate power if top speed changed
         st.session_state.current_pwm_power = calculate_motor_power(
             st.session_state.current_game_speed_mph,
             st.session_state.top_speed
@@ -145,12 +111,10 @@ with controls_col:
     st.session_state.manual_speed_mode = st.checkbox("Enable Manual Speed Control", value=st.session_state.manual_speed_mode, key="manual_mode_checkbox")
 
     if st.session_state.manual_speed_mode:
-        # Ensure slider value doesn't exceed the current top_speed
         manual_max = float(st.session_state.top_speed)
         current_manual_val = st.session_state.manual_speed_setpoint_mph
-        if current_manual_val > manual_max: # Adjust if top_speed was lowered below current manual val
+        if current_manual_val > manual_max: 
             current_manual_val = manual_max
-
         new_manual_speed = st.slider(
             "Set Game Speed Manually (mph):",
             min_value=0.0,
@@ -162,20 +126,17 @@ with controls_col:
         )
         if new_manual_speed != st.session_state.manual_speed_setpoint_mph:
              st.session_state.manual_speed_setpoint_mph = new_manual_speed
-             # If simulation is running in manual mode, this will be picked up by run_simulation_step
-
+             
     sim_button_text = "Stop Simulation" if st.session_state.simulation_running else "Start Simulation"
     if st.button(sim_button_text, key="sim_toggle_button"):
         st.session_state.simulation_running = not st.session_state.simulation_running
         if st.session_state.simulation_running:
             add_log("Simulation started.")
             st.session_state.start_time = time.time()
-            # Reset history only when starting, not every time button is clicked
             st.session_state.history_data = pd.DataFrame(columns=['Time', 'Game Speed (mph)', 'PWM Power (%)'])
         else:
             add_log("Simulation stopped.")
-            # run_simulation_step() will handle setting speed/pwm to 0 on next rerun if not running
-
+            
 with visuals_col:
     st.header("📊 Live Status & Visuals")
     
@@ -183,17 +144,96 @@ with visuals_col:
     status_m1.metric(label="Current Simulated Game Speed", value=f"{st.session_state.current_game_speed_mph:.1f} mph")
     status_m2.metric(label="Calculated PWM Power", value=f"{st.session_state.current_pwm_power:.1f} %")
 
-    st.subheader("Fan PWM Output Level")
-    st.progress(int(st.session_state.current_pwm_power))
+    st.subheader("Fan PWM Output Level (Gauge)")
+    gauge_fig = go.Figure(go.Indicator(
+        mode = "gauge+number",
+        value = st.session_state.current_pwm_power,
+        title = {'text': "PWM (%)", 'font': {'size': 16}}, # Smaller title font
+        gauge = {'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': "darkblue"},
+                 'bar': {'color': "royalblue"},
+                 'bgcolor': "white",
+                 'borderwidth': 2,
+                 'bordercolor': "gray",
+                 'steps' : [
+                     {'range': [0, 33], 'color': "lightgreen"},
+                     {'range': [33, 66], 'color': "yellow"},
+                     {'range': [66, 100], 'color': "lightcoral"}],
+                 'threshold' : {'line': {'color': "red", 'width': 4}, 'thickness': 0.75, 'value': 90}}))
+    gauge_fig.update_layout(height=200, margin=dict(l=20, r=20, t=50, b=20)) # Adjusted margins
+    st.plotly_chart(gauge_fig, use_container_width=True)
 
-    st.subheader("Output History (Last 100 points)")
-    if not st.session_state.history_data.empty:
-        # Create a chart with a shared Y-axis for Game Speed and PWM Power for better comparison if scales are similar
-        # Or, create two separate charts if scales are too different. For now, one chart with two lines.
-        chart_df = st.session_state.history_data.set_index('Time')
-        st.line_chart(chart_df)
+    st.subheader("Output History")
+    if not st.session_state.history_data.empty and len(st.session_state.history_data) > 1:
+        history_fig = go.Figure()
+        history_fig.add_trace(go.Scatter(
+            x=st.session_state.history_data['Time'],
+            y=st.session_state.history_data['Game Speed (mph)'],
+            mode='lines', # Smoother lines
+            name='Game Speed (mph)',
+            line=dict(color='blue', width=2)
+        ))
+        history_fig.add_trace(go.Scatter(
+            x=st.session_state.history_data['Time'],
+            y=st.session_state.history_data['PWM Power (%)'],
+            mode='lines', # Smoother lines
+            name='PWM Power (%)',
+            yaxis='y2', # Use a secondary y-axis
+            line=dict(color='red', width=2)
+        ))
+        history_fig.update_layout(
+            # title="Live Output History", # Removed title from here as subheader exists
+            xaxis_title="Time Elapsed (s)",
+            yaxis_title="Game Speed (mph)",
+            yaxis=dict(range=[0, st.session_state.top_speed + 10]), # Dynamically set y-axis range a bit
+            yaxis2=dict(
+                title="PWM Power (%)",
+                overlaying='y',
+                side='right',
+                range=[0,105] # PWM is 0-100
+            ),
+            legend_title_text="Metrics",
+            height=350, # Adjusted height
+            margin=dict(l=20, r=20, t=20, b=20) # Compact margins
+        )
+        st.plotly_chart(history_fig, use_container_width=True)
     else:
-        st.caption("No history data yet. Start the simulation to populate charts.")
+        st.caption("No history data yet or not enough data (need >1 point). Start the simulation to populate charts.")
+
+    # Optional 3D Scatter Plot
+    st.subheader("3D View (Time, Speed, PWM)")
+    if not st.session_state.history_data.empty and len(st.session_state.history_data) > 1:
+        fig_3d = go.Figure(data=[go.Scatter3d(
+            x=st.session_state.history_data['Time'],
+            y=st.session_state.history_data['Game Speed (mph)'],
+            z=st.session_state.history_data['PWM Power (%)'],
+            mode='lines+markers', # Show lines connecting points and markers
+            marker=dict(
+                size=4, # Smaller markers
+                color=st.session_state.history_data['PWM Power (%)'], # Color points by PWM value
+                colorscale='Viridis',  # Choose a colorscale
+                opacity=0.8,
+                colorbar=dict(title='PWM (%)', thickness=10)
+            ),
+            line=dict(
+                color='darkblue', # Line color
+                width=2
+            )
+        )])
+        fig_3d.update_layout(
+            # title="3D History: Time, Speed, PWM", # Title removed as subheader exists
+            scene=dict(
+                xaxis_title='Time (s)',
+                yaxis_title='Game Speed (mph)',
+                zaxis_title='PWM Power (%)',
+                aspectratio=dict(x=1.5, y=1, z=0.8) # Adjust aspect ratio for better view
+            ),
+            height=450, # Adjusted height
+            margin=dict(l=0, r=0, b=0, t=0) # Minimal margins for 3D plot
+        )
+        st.plotly_chart(fig_3d, use_container_width=True)
+    else:
+        st.caption("Not enough data for 3D history yet (need >1 point).")
+
 
 st.header("📝 Event Log")
 log_container = st.container(height=250)
@@ -205,16 +245,9 @@ st.caption("This simulator combines and adapts logic from the original project f
 
 # --- Main Simulation Loop Control ---
 if st.session_state.simulation_running:
-    run_simulation_step() # Update game state
-    time.sleep(0.1) # Update frequency (10 Hz for smoother charts)
-    try:
-        st.rerun() # Trigger rerun to update UI and continue loop
-    except st.errors.ScriptThreadControlException: # Handle potential errors during rerun if app is closing
-        pass
+    run_simulation_step() 
+    time.sleep(0.1) # Update frequency (10 Hz) 
+    st.rerun() 
 elif not st.session_state.simulation_running and st.session_state.current_game_speed_mph != 0.0:
-    # If simulation was just stopped, ensure speed is set to 0 and UI updates one last time.
     run_simulation_step()
-    try:
-        st.rerun()
-    except st.errors.ScriptThreadControlException:
-        pass
+    st.rerun()
